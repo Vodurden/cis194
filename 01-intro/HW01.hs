@@ -2,6 +2,8 @@
 module HW01 where
 
 import Data.Char (digitToInt)
+import Data.Maybe
+import qualified Data.Map.Strict as Map
 
 -- ===================================
 -- Ex 1: Credit Card Validation
@@ -64,7 +66,8 @@ hanoi 1 start end _ = [(start, end)]
 hanoi 2 start end storage = [(start, storage), (start, end), (storage, end)]
 hanoi n start end storage = (hanoi (n-1) start storage end) ++ [(start, end)] ++ (hanoi (n-1) storage end start)
 
--- Super Hanoi: Now with four pegs!
+-- Super Duper Hanoi: Now with r pegs!
+-- Since we're doing four why not do more?
 -- We basically want to move the top k pegs of the tower to one storage then move the rest to
 -- the end and move the original top back.
 --
@@ -73,25 +76,10 @@ hanoi n start end storage = (hanoi (n-1) start storage end) ++ [(start, end)] ++
 -- you have an optimal k you effectively have to try all values between 1 and the number of disks
 -- to be sure you've picked a k that results in the lowest number of steps.
 --
--- I've looked at some small output and it looks reasonably but this hasn't been tested correct
+-- I've looked at some small output and it looks correct but this hasn't been tested. (Update: Some testing has been done)
 -- (Idea: Build a simulator taking the output of these functions and checking that each move is valid)
-superHanoi :: Integer -> Peg -> Peg -> Peg -> Peg -> [Move]
-superHanoi 0 _ _ _ _ = []
-superHanoi 1 start end _ _ = [(start, end)]
-superHanoi n start end upperStorage lowerStorage =
-  let k
-        | n > 3 = (n `div` 2)
-        | otherwise = n - 1 -- Optimise for cases that can't take advantage of four pegs
-      upperHeight = k
-      lowerHeight = n - k
-      -- We want to use both storage pegs when moving the upper storage
-      moveUpperToStorage = superHanoi lowerHeight start upperStorage end lowerStorage
-      moveLowerToEnd = hanoi lowerHeight start end lowerStorage
-      moveUpperToEnd = hanoi upperHeight upperStorage end start
-  in moveUpperToStorage ++ moveLowerToEnd ++ moveUpperToEnd
-
--- Super Duper Hanoi: Now with r pegs!
--- Since we're doing four why not do more?
+-- (Update: Simulator built. hanoi and superDuperHanoi seem to work well assuming the simulator is valid
+--          unfortunately superHanoi did not make the cut and has been removed!)
 superDuperHanoi :: Integer -> [Peg] -> [Move]
 superDuperHanoi _ [] = [] -- No pegs? No problem!
 superDuperHanoi _ [_] = [] -- One peg? Still no problem!
@@ -109,12 +97,48 @@ superDuperHanoi n (start:end:storage:rest) =
       moveUpperToEnd = superDuperHanoi upperHeight (storage:end:start:rest)
   in moveUpperToStorage ++ moveLowerToEnd ++ moveUpperToEnd
 
+-- Validates that a hanoi solution doesn't violate any hanoi rules
+validateHanoiSolution :: Integer -> [Peg] -> [Move] -> Bool
+validateHanoiSolution disks pegs moves =
+  -- Initial state represents the size of the disk at the top of each peg.
+  -- We treat the smallest disk as size 1 with the largest being of size `disks`
+  let initialState = Just (buildInitialPegState disks pegs)
+  in isJust $ foldl applyMove initialState moves
+
+applyMove :: Maybe (Map.Map Peg [Integer]) -> Move -> Maybe (Map.Map Peg [Integer])
+applyMove Nothing _ = Nothing
+applyMove (Just state) (from, to)
+  | (Map.notMember from state) || (Map.notMember to state) = Nothing
+  | null $ (fromJust $ Map.lookup from state) = Nothing -- If we're moving from empty we're invalid
+  | otherwise =
+      let fromStack = fromJust $ Map.lookup from state
+          toStack = fromJust $ Map.lookup to state
+
+          -- We've already checked that we're not moving from a null space
+          -- but we want to check that we're moving to a valid space (bigger or empty)
+          movingOntoValidSpace = (null toStack) || (head toStack > head fromStack)
+
+          adjustFrom = Map.adjust (tail) from state
+          adjustTo = Map.adjust ((head fromStack):) to adjustFrom
+      in if movingOntoValidSpace then Just adjustTo else Nothing
+
+buildInitialPegState :: Integer -> [Peg] -> Map.Map Peg [Integer]
+buildInitialPegState _ [] = Map.empty
+buildInitialPegState disks (start:others) =
+  let startState = (start, [1..disks])
+      rest = map (\x -> (x, [])) others
+  in Map.fromList $ startState : rest
+
 -- According to the homework page a 4 peg 15 disk problem can be solved in
 -- 129 moves. The best I've got so far is 305 moves with the superDuperHanoi algorithm.
 -- Further study is needed (possibly try other values for k)
-hanoiLengths :: Integer -> [(String, Int)]
-hanoiLengths n =
-  let hanoiLength = ("Hanoi", length $ hanoi n "a" "b" "c")
-      superHanoiLength = ("Super Hanoi", length $ superHanoi n "a" "b" "c" "d")
-      superDuperHanoiLength = ("Super Duper Hanoi", length $ superDuperHanoi n ["a", "b", "c", "d"])
-  in [hanoiLength, superHanoiLength, superDuperHanoiLength]
+runHanoi :: Integer -> [(String, Int, Bool)]
+runHanoi n =
+  let pegs = ["a", "b", "c", "d"] :: [Peg]
+
+      run :: String -> [Peg] -> [Move] -> (String, Int, Bool)
+      run name p moves = (name, length moves, validateHanoiSolution n p moves)
+
+      hanoiResults = run "Hanoi" ["a", "b", "c"] (hanoi n "a" "b" "c")
+      superDuperHanoiResults = run "Super Duper Hanoi" pegs (superDuperHanoi n pegs)
+  in [hanoiResults, superDuperHanoiResults]
